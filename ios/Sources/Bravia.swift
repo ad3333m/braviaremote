@@ -330,11 +330,19 @@ enum Key: String {
         }
     }
 
+    /// Sideloaded apps that aren't on Google Play but have an icon online.
+    private static let ownIcons = [
+        "com.ad3333m.ciname": "https://raw.githubusercontent.com/ad3333m/anikku/main/ciname/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    ]
+
     /// The app's Google Play icon (sharp and square), else the TV's own icon, else nil for a letter tile.
     func icon(for app: TVApp) async -> UIImage? {
         if let hit = icons.object(forKey: app.uri as NSString) { return hit }
         var image: UIImage?
-        for package in app.packages {
+        if let own = app.packages.lazy.compactMap({ Self.ownIcons[$0] }).first, let url = URL(string: own) {
+            image = await fetchImage(url)
+        }
+        for package in app.packages where image == nil {
             if let url = await playIcon(package) { image = await fetchImage(url); break }
         }
         if image == nil, var parts = URLComponents(string: app.icon), parts.scheme != nil {
