@@ -64,7 +64,7 @@ struct RemoteView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("BRAVIA").font(.system(size: 30, weight: .heavy, design: .rounded)).tracking(1.5)
+                Text("BRAVIA").font(.system(size: 26, weight: .semibold)).tracking(6)
                 HStack(spacing: 7) {
                     Circle().fill(statusColor).frame(width: 8, height: 8)
                         .shadow(color: statusColor, radius: 4)
@@ -73,7 +73,7 @@ struct RemoteView: View {
             }
             Spacer()
             RoundButton(icon: "gearshape.fill", size: 46) { panel = .settings }
-            RoundButton(icon: "power", size: 58, tint: tv.power == .on ? Color(red: 1, green: 0.25, blue: 0.3) : .green) {
+            RoundButton(icon: "power", size: 58, tint: tv.power == .on ? Color(red: 1, green: 0.3, blue: 0.3).opacity(0.45) : nil) {
                 Task { await tv.togglePower() }
             }
         }
@@ -114,7 +114,7 @@ struct RemoteView: View {
                     Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
                 }
                 .padding(16)
-                .glass(22, tint: .orange.opacity(0.25), interactive: true)
+                .glass(22, interactive: true)
             }
             .buttonStyle(Press())
         }
@@ -126,23 +126,21 @@ struct RemoteView: View {
         let onInput = tv.nowURI.hasPrefix("extInput")
         let onApp = !onInput && !tv.nowPlaying.isEmpty
         return HStack(spacing: 14) {
-            tile("Inputs", icon: "rectangle.connected.to.line.below", tint: Color(red: 0.1, green: 0.75, blue: 0.95),
-                 detail: onInput ? tv.nowPlaying : "HDMI & more") { panel = .inputs }
-            tile("Apps", icon: "square.grid.2x2.fill", tint: Color(red: 0.65, green: 0.45, blue: 1),
-                 detail: onApp ? tv.nowPlaying : "Open any app") { panel = .apps }
+            tile("Inputs", icon: "tv.and.mediabox", detail: onInput ? tv.nowPlaying : "HDMI & more") { panel = .inputs }
+            tile("Apps", icon: "square.grid.2x2", detail: onApp ? tv.nowPlaying : "Open any app") { panel = .apps }
         }
     }
 
-    private func tile(_ title: String, icon: String, tint: Color, detail: String, action: @escaping () -> Void) -> some View {
+    private func tile(_ title: String, icon: String, detail: String, action: @escaping () -> Void) -> some View {
         Button { haptic(.medium); action() } label: {
             VStack(alignment: .leading, spacing: 0) {
                 Image(systemName: icon)
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 42, height: 42)
-                    .background(tint.opacity(0.85), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .shadow(color: tint.opacity(0.6), radius: 10, y: 4)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 44, height: 44)
+                    .background(Color.white.opacity(0.12), in: Circle())
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
                 Spacer(minLength: 14)
-                Text(title).font(.system(size: 20, weight: .bold, design: .rounded))
+                Text(title).font(.system(size: 19, weight: .semibold))
                 Text(detail).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,7 +162,7 @@ struct RemoteView: View {
                     arrow("chevron.left", .left)
                     Button { haptic(.medium); tv.send(.ok) } label: {
                         Text("OK")
-                            .font(.system(size: 21, weight: .bold, design: .rounded))
+                            .font(.system(size: 19, weight: .semibold))
                             .frame(width: 96, height: 96)
                             .glass(48, tint: .white.opacity(0.12), interactive: true)
                     }
@@ -180,8 +178,8 @@ struct RemoteView: View {
     private func arrow(_ icon: String, _ key: Key) -> some View {
         RepeatButton(action: { tv.send(key) }) {
             Image(systemName: icon)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white.opacity(0.9))
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 80, height: 80)
         }
     }
@@ -244,7 +242,7 @@ struct RemoteView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(tv.muted ? Color.orange : Color.white)
                     Text(tv.volume.map { "\($0)" } ?? "–")
-                        .font(.system(size: 26, weight: .bold, design: .rounded)).monospacedDigit()
+                        .font(.system(size: 26, weight: .semibold)).monospacedDigit()
                     Text("VOLUME").font(.system(size: 9, weight: .bold)).tracking(1).foregroundStyle(.white.opacity(0.5))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())

@@ -1,23 +1,22 @@
 import SwiftUI
 
-/// Dark backdrop with slow-drifting colour so the glass has something to blur.
+/// Graphite backdrop with soft drifting light so the glass has something to blur.
 struct Backdrop: View {
     @State private var drift = false
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.06, green: 0.07, blue: 0.14), Color(red: 0.01, green: 0.01, blue: 0.04)],
-                           startPoint: .top, endPoint: .bottom)
-            blob(Color(red: 0.36, green: 0.30, blue: 0.95), 360, x: drift ? -110 : -40, y: drift ? -300 : -230)
-            blob(Color(red: 0.00, green: 0.72, blue: 0.86), 300, x: drift ? 150 : 90, y: drift ? 20 : 110)
-            blob(Color(red: 0.96, green: 0.30, blue: 0.56), 260, x: drift ? -60 : -150, y: drift ? 360 : 280)
+            LinearGradient(colors: [Color(white: 0.09), Color(white: 0.02)], startPoint: .top, endPoint: .bottom)
+            blob(Color(white: 1), 0.10, 380, x: drift ? -120 : -50, y: drift ? -320 : -250)
+            blob(Color(red: 0.55, green: 0.65, blue: 0.85), 0.14, 320, x: drift ? 140 : 80, y: drift ? 40 : 130)
+            blob(Color(white: 1), 0.06, 280, x: drift ? -70 : -140, y: drift ? 380 : 300)
         }
         .ignoresSafeArea()
         .onAppear { withAnimation(.easeInOut(duration: 16).repeatForever(autoreverses: true)) { drift = true } }
     }
 
-    private func blob(_ color: Color, _ size: CGFloat, x: CGFloat, y: CGFloat) -> some View {
-        Circle().fill(color.opacity(0.5)).frame(width: size, height: size).blur(radius: 90).offset(x: x, y: y)
+    private func blob(_ color: Color, _ strength: Double, _ size: CGFloat, x: CGFloat, y: CGFloat) -> some View {
+        Circle().fill(color.opacity(strength)).frame(width: size, height: size).blur(radius: 90).offset(x: x, y: y)
     }
 }
 

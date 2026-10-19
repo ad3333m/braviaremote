@@ -9,7 +9,7 @@ struct SheetScaffold<Content: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(title).font(.system(size: 28, weight: .bold, design: .rounded))
+                Text(title).font(.system(size: 28, weight: .bold))
                 Spacer()
                 Button { haptic(); dismiss() } label: {
                     Image(systemName: "xmark").font(.system(size: 14, weight: .bold))
@@ -58,12 +58,12 @@ struct InputsSheet: View {
 
     private func row(_ input: TVInput) -> some View {
         let current = input.uri == tv.nowURI
-        let accent = Color(red: 0.1, green: 0.75, blue: 0.95)
         return HStack(spacing: 14) {
             Image(systemName: input.symbol)
-                .font(.system(size: 19, weight: .semibold))
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(current ? Color.black : Color.white)
                 .frame(width: 46, height: 46)
-                .background((current ? accent : Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color.white.opacity(current ? 0.9 : 0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(input.name).font(.system(size: 17, weight: .semibold))
                 Text(input.label.isEmpty ? (input.connected ? "Connected" : "Nothing plugged in") : input.title)
@@ -71,13 +71,13 @@ struct InputsSheet: View {
             }
             Spacer()
             if current {
-                Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(accent)
+                Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(.white)
             } else if input.connected {
                 Circle().fill(Color.green).frame(width: 8, height: 8)
             }
         }
         .padding(14)
-        .glass(22, tint: current ? accent.opacity(0.3) : nil, interactive: true)
+        .glass(22, tint: current ? Color.white.opacity(0.15) : nil, interactive: true)
         .opacity(input.connected || current ? 1 : 0.55)
     }
 }
@@ -88,6 +88,7 @@ struct AppsSheet: View {
     @EnvironmentObject private var tv: TV
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
+    @AppStorage("iconSize") private var iconSize = 76.0
 
     private var shown: [TVApp] {
         search.isEmpty ? tv.apps : tv.apps.filter { $0.title.localizedCaseInsensitiveContains(search) }
@@ -113,20 +114,17 @@ struct AppsSheet: View {
                 } else if shown.isEmpty {
                     empty("No app called \"\(search)\".")
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 14)], spacing: 20) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize), spacing: iconSize * 0.24)], spacing: iconSize * 0.24) {
                         ForEach(shown) { app in
                             Button {
                                 haptic(.medium)
                                 Task { await tv.open(app) }
                                 dismiss()
                             } label: {
-                                VStack(spacing: 8) {
-                                    AppIconView(app: app, current: app.uri == tv.nowURI)
-                                    Text(app.title).font(.caption.weight(.medium)).lineLimit(1)
-                                        .foregroundStyle(.white.opacity(0.85))
-                                }
+                                AppIconView(app: app, size: iconSize, current: app.uri == tv.nowURI)
                             }
                             .buttonStyle(Press())
+                            .accessibilityLabel(app.title)
                         }
                     }
                 }
@@ -139,34 +137,28 @@ struct AppsSheet: View {
 
 struct AppIconView: View {
     let app: TVApp
-    let current: Bool
+    var size: CGFloat = 76
+    var current = false
     @EnvironmentObject private var tv: TV
     @State private var image: UIImage?
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
         ZStack {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                LinearGradient(colors: [Color(hue: hue, saturation: 0.65, brightness: 0.85),
-                                        Color(hue: hue, saturation: 0.8, brightness: 0.45)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: [Color(white: 0.26), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
                 Text(String(app.title.prefix(1)).uppercased())
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: size * 0.4, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
             }
         }
-        .frame(width: 72, height: 72)
+        .frame(width: size, height: size)
         .clipShape(shape)
-        .overlay(shape.strokeBorder(current ? Color(red: 0.65, green: 0.45, blue: 1) : Color.white.opacity(0.18),
-                                    lineWidth: current ? 3 : 1))
-        .shadow(color: .black.opacity(0.35), radius: 10, y: 6)
-        .task(id: app.icon) { image = await tv.icon(app.icon) }
-    }
-
-    /// Stable colour per app name for the letter tile.
-    private var hue: Double {
-        Double(app.title.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 360 }) / 360
+        .overlay(shape.strokeBorder(Color.white.opacity(current ? 0.95 : 0.12), lineWidth: current ? 3 : 1))
+        .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
+        .task(id: app.uri) { image = await tv.icon(for: app) }
     }
 }
 
@@ -191,7 +183,7 @@ struct KeyboardSheet: View {
                         .onSubmit(send)
                         .padding(.horizontal, 16).padding(.vertical, 14)
                         .glass(18)
-                    RoundButton(icon: "paperplane.fill", size: 52, tint: Color(red: 0.36, green: 0.3, blue: 0.95), action: send)
+                    RoundButton(icon: "paperplane.fill", size: 52, action: send)
                 }
             }
         }
@@ -212,6 +204,7 @@ struct SettingsSheet: View {
     @EnvironmentObject private var tv: TV
     @AppStorage("host") private var host = ""
     @AppStorage("psk") private var psk = ""
+    @AppStorage("iconSize") private var iconSize = 76.0
     @State private var note = ""
     @State private var busy = false
 
@@ -232,6 +225,33 @@ struct SettingsSheet: View {
                     }
                 }
 
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("APP ICON SIZE").font(.caption.weight(.bold)).tracking(0.8).foregroundStyle(.white.opacity(0.55))
+                        Spacer()
+                        Text("\(Int(iconSize)) pt").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.55))
+                    }
+                    HStack(spacing: 12) {
+                        Image(systemName: "square.grid.3x3").foregroundStyle(.white.opacity(0.6))
+                        Slider(value: $iconSize, in: 56...132, step: 4).tint(.white)
+                        Image(systemName: "square.grid.2x2").font(.title3).foregroundStyle(.white.opacity(0.6))
+                    }
+                    HStack(spacing: iconSize * 0.24) {
+                        ForEach(tv.apps.prefix(previewCount)) { app in AppIconView(app: app, size: iconSize) }
+                        if tv.apps.isEmpty {
+                            ForEach(0..<previewCount, id: \.self) { _ in
+                                RoundedRectangle(cornerRadius: iconSize * 0.24, style: .continuous)
+                                    .fill(Color.white.opacity(0.14))
+                                    .frame(width: iconSize, height: iconSize)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.spring(response: 0.3), value: iconSize)
+                }
+                .padding(18)
+                .glass(24)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Set up the TV once", systemImage: "tv").font(.headline)
                     step(1, "On the TV open Settings → Network & Internet → Home network → IP control.")
@@ -244,8 +264,12 @@ struct SettingsSheet: View {
             }
         }
         .presentationDetents([.large])
+        .task { if tv.apps.isEmpty { await tv.loadApps() } }
         .onDisappear { tv.reset() }
     }
+
+    /// As many preview icons as fit across the sheet.
+    private var previewCount: Int { max(1, min(3, Int(300 / (iconSize * 1.24)))) }
 
     private func field(_ label: String, _ hint: String, _ value: Binding<String>, _ keyboard: UIKeyboardType) -> some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -264,7 +288,7 @@ struct SettingsSheet: View {
         Button { haptic(); action() } label: {
             Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
-                .glass(20, tint: Color(red: 0.36, green: 0.3, blue: 0.95).opacity(0.5), interactive: true)
+                .glass(20, tint: Color.white.opacity(0.12), interactive: true)
         }
         .buttonStyle(Press())
         .disabled(busy)

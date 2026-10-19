@@ -25,6 +25,17 @@ struct TVInput: Identifiable, Hashable {
 struct TVApp: Identifiable, Hashable {
     let uri: String, title: String, icon: String
     var id: String { uri }
+
+    /// Package names to look up on Google Play. Sony's app URIs are "com.sony.dtv.<package>.<activity class>",
+    /// and the activity class usually starts again with the package's first part (com/tv/org…).
+    var packages: [String] {
+        let prefix = "com.sony.dtv."
+        guard uri.hasPrefix(prefix) else { return [] }
+        let parts = uri.dropFirst(prefix.count).split(separator: ".").map(String.init)
+        guard parts.count >= 2 else { return [] }
+        return (2..<parts.count).filter { parts[$0] == parts[0] }.map { parts[..<$0].joined(separator: ".") }
+            + [parts.dropLast().joined(separator: ".")]
+    }
 }
 
 enum Power: Equatable { case unknown, on, standby, offline, badKey }
@@ -301,17 +312,52 @@ enum Key: String {
         }
     }
 
-    /// App icons are served by the TV itself, which wants the key too.
-    func icon(_ address: String) async -> UIImage? {
-        if let hit = icons.object(forKey: address as NSString) { return hit }
-        guard var parts = URLComponents(string: address), parts.scheme != nil else { return nil }
-        if parts.host == "localhost" || parts.host == "127.0.0.1" { parts.host = host }
-        guard let url = parts.url else { return nil }
-        var req = URLRequest(url: url, timeoutInterval: 8)
-        req.setValue(psk, forHTTPHeaderField: "X-Auth-PSK")
-        guard let res = try? await URLSession.shared.data(for: req), let image = UIImage(data: res.0) else { return nil }
-        icons.setObject(image, forKey: address as NSString)
+    /// The app's Google Play icon (sharp and square), else the TV's own icon, else nil for a letter tile.
+    func icon(for app: TVApp) async -> UIImage? {
+        if let hit = icons.object(forKey: app.uri as NSString) { return hit }
+        var image: UIImage?
+        for package in app.packages {
+            if let url = await playIcon(package) { image = await fetchImage(url); break }
+        }
+        if image == nil, var parts = URLComponents(string: app.icon), parts.scheme != nil {
+            if parts.host == "localhost" || parts.host == "127.0.0.1" { parts.host = host }
+            if let url = parts.url { image = await fetchImage(url, key: true) }
+        }
+        if let image { icons.setObject(image, forKey: app.uri as NSString) }
         return image
+    }
+
+    /// Reads og:image off the app's Play page once, then remembers it ("" = not on Play).
+    private func playIcon(_ package: String) async -> URL? {
+        if let known = (UserDefaults.standard.dictionary(forKey: "playIcons") as? [String: String])?[package] {
+            return URL(string: known)
+        }
+        guard let page = URL(string: "https://play.google.com/store/apps/details?id=\(package)&hl=en") else { return nil }
+        var req = URLRequest(url: page, timeoutInterval: 12)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+                     forHTTPHeaderField: "User-Agent")
+        guard let res = try? await URLSession.shared.data(for: req) else { return nil }
+        let status = (res.1 as? HTTPURLResponse)?.statusCode ?? 0
+        var found = ""
+        if status == 200, let html = String(data: res.0, encoding: .utf8),
+           let start = html.range(of: "<meta property=\"og:image\" content=\""),
+           let end = html[start.upperBound...].firstIndex(of: "\"") {
+            let full = html[start.upperBound..<end]
+            found = String(full.split(separator: "=", maxSplits: 1).first ?? full) + "=s256"
+        } else if status != 404 {
+            return nil  // network trouble: try again next time
+        }
+        var known = UserDefaults.standard.dictionary(forKey: "playIcons") as? [String: String] ?? [:]
+        known[package] = found
+        UserDefaults.standard.set(known, forKey: "playIcons")
+        return URL(string: found)
+    }
+
+    private func fetchImage(_ url: URL, key: Bool = false) async -> UIImage? {
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        if key { req.setValue(psk, forHTTPHeaderField: "X-Auth-PSK") }
+        guard let res = try? await URLSession.shared.data(for: req) else { return nil }
+        return UIImage(data: res.0)
     }
 
     private func fillDemo() {
@@ -323,10 +369,22 @@ enum Key: String {
             TVInput(uri: "extInput:hdmi?port=4", title: "HDMI 4 (eARC/ARC)", label: "Soundbar", icon: "meta:avamp", connected: true),
             TVInput(uri: "extInput:widi?port=1", title: "Screen mirroring", label: "", icon: "meta:wifidisplay", connected: true),
         ]
-        apps = ["YouTube", "Netflix", "Ciname TV", "Prime Video", "Disney+", "Spotify", "Twitch", "Plex", "Crunchyroll",
-                "Google Play Store", "Apple TV", "Photos", "Settings", "Live TV"]
-            .map { TVApp(uri: "demo:\($0)", title: $0, icon: "") }
-            .sorted { $0.title < $1.title }
+        apps = [
+            ("YouTube", "com.google.android.youtube.tv.com.google.android.apps.youtube.tv.activity.ShellActivity"),
+            ("Netflix", "com.netflix.ninja.com.netflix.ninja.MainActivity"),
+            ("Prime Video", "com.amazon.amazonvideo.livingroom.com.amazon.ignition.IgnitionActivity"),
+            ("Disney+", "com.disney.disneyplus.com.bamtechmedia.dominguez.main.MainActivity"),
+            ("Spotify", "com.spotify.tv.android.com.spotify.tv.android.SpotifyTVActivity"),
+            ("Twitch", "tv.twitch.android.viewer.tv.twitch.android.apps.TwitchActivity"),
+            ("Plex", "com.plexapp.android.com.plexapp.plex.activities.SplashActivity"),
+            ("Crunchyroll", "com.crunchyroll.crunchyroid.com.ellation.crunchyroll.presentation.startup.StartupActivity"),
+            ("Apple TV", "com.apple.atve.androidtv.appletv.com.apple.atve.androidtv.appletv.MainActivity"),
+            ("Google Play Store", "com.android.vending.com.google.android.finsky.tvmainactivity.TvMainActivity"),
+            ("Ciname TV", "com.ad3333m.ciname.com.ad3333m.ciname.MainActivity"),
+            ("Live TV", "com.sony.dtv.tvx.com.sony.dtv.tvx.MainActivity"),
+        ]
+        .map { TVApp(uri: "com.sony.dtv." + $0.1, title: $0.0, icon: "") }
+        .sorted { $0.title < $1.title }
         nowURI = "extInput:hdmi?port=2"; nowPlaying = "Nintendo Switch"
     }
 }
