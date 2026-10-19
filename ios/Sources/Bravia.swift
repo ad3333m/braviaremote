@@ -30,8 +30,8 @@ struct TVApp: Identifiable, Hashable {
     /// and the activity class usually starts again with the package's first part (com/tv/org…).
     var packages: [String] {
         let prefix = "com.sony.dtv."
-        guard uri.hasPrefix(prefix) else { return [] }
-        let parts = uri.dropFirst(prefix.count).split(separator: ".").map(String.init)
+        guard !uri.contains(":"), !uri.contains("/") else { return [] }
+        let parts = (uri.hasPrefix(prefix) ? uri.dropFirst(prefix.count) : Substring(uri)).split(separator: ".").map(String.init)
         guard parts.count >= 2 else { return [] }
         return (2..<parts.count).filter { parts[$0] == parts[0] }.map { parts[..<$0].joined(separator: ".") }
             + [parts.dropLast().joined(separator: ".")]
@@ -335,48 +335,102 @@ enum Key: String {
         "com.ad3333m.ciname": "https://raw.githubusercontent.com/ad3333m/anikku/main/ciname/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
     ]
 
-    /// The app's Google Play icon (sharp and square), else the TV's own icon, else nil for a letter tile.
+    /// Icon order: one you picked from Photos, a known one, Google Play, the TV's own, APKPure (sideloaded apps),
+    /// else nil for a letter tile.
     func icon(for app: TVApp) async -> UIImage? {
         if let hit = icons.object(forKey: app.uri as NSString) { return hit }
-        var image: UIImage?
-        if let own = app.packages.lazy.compactMap({ Self.ownIcons[$0] }).first, let url = URL(string: own) {
+        var image = UIImage(contentsOfFile: customIconFile(app).path)
+        if image == nil, let own = app.packages.lazy.compactMap({ Self.ownIcons[$0] }).first, let url = URL(string: own) {
             image = await fetchImage(url)
         }
         for package in app.packages where image == nil {
-            if let url = await playIcon(package) { image = await fetchImage(url); break }
+            if let url = await storeIcon(package, store: "playIcons",
+                                         page: "https://play.google.com/store/apps/details?id=\(package)&hl=en",
+                                         parse: Self.playIcon) {
+                image = await fetchImage(url)
+            }
         }
         if image == nil, var parts = URLComponents(string: app.icon), parts.scheme != nil {
             if parts.host == "localhost" || parts.host == "127.0.0.1" { parts.host = host }
             if let url = parts.url { image = await fetchImage(url, key: true) }
         }
+        for package in app.packages where image == nil {
+            if let url = await storeIcon(package, store: "apkpureIcons", page: "https://apkpure.com/search?q=\(package)",
+                                         parse: { Self.apkpureIcon($0, package) }) {
+                image = await fetchImage(url)
+            }
+        }
         if let image { icons.setObject(image, forKey: app.uri as NSString) }
         return image
     }
 
-    /// Reads og:image off the app's Play page once, then remembers it ("" = not on Play).
-    private func playIcon(_ package: String) async -> URL? {
-        if let known = (UserDefaults.standard.dictionary(forKey: "playIcons") as? [String: String])?[package] {
+    /// Looks the package up on a store page once and remembers the icon address ("" = not there).
+    private func storeIcon(_ package: String, store: String, page: String, parse: (String) -> String?) async -> URL? {
+        if let known = (UserDefaults.standard.dictionary(forKey: store) as? [String: String])?[package] {
             return URL(string: known)
         }
-        guard let page = URL(string: "https://play.google.com/store/apps/details?id=\(package)&hl=en") else { return nil }
-        var req = URLRequest(url: page, timeoutInterval: 12)
+        guard let url = URL(string: page) else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: 12)
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
                      forHTTPHeaderField: "User-Agent")
         guard let res = try? await URLSession.shared.data(for: req) else { return nil }
         let status = (res.1 as? HTTPURLResponse)?.statusCode ?? 0
-        var found = ""
-        if status == 200, let html = String(data: res.0, encoding: .utf8),
-           let start = html.range(of: "<meta property=\"og:image\" content=\""),
-           let end = html[start.upperBound...].firstIndex(of: "\"") {
-            let full = html[start.upperBound..<end]
-            found = String(full.split(separator: "=", maxSplits: 1).first ?? full) + "=s256"
-        } else if status != 404 {
-            return nil  // network trouble: try again next time
-        }
-        var known = UserDefaults.standard.dictionary(forKey: "playIcons") as? [String: String] ?? [:]
+        guard status == 200 || status == 404 else { return nil }  // network trouble: try again next time
+        let found = status == 200 ? String(data: res.0, encoding: .utf8).flatMap(parse) ?? "" : ""
+        var known = UserDefaults.standard.dictionary(forKey: store) as? [String: String] ?? [:]
         known[package] = found
-        UserDefaults.standard.set(known, forKey: "playIcons")
+        UserDefaults.standard.set(known, forKey: store)
         return URL(string: found)
+    }
+
+    /// Google Play: og:image is the icon; "=s256" asks for a 256px copy.
+    private static func playIcon(_ html: String) -> String? {
+        guard let start = html.range(of: "<meta property=\"og:image\" content=\""),
+              let end = html[start.upperBound...].firstIndex(of: "\"") else { return nil }
+        let full = html[start.upperBound..<end]
+        return String(full.split(separator: "=", maxSplits: 1).first ?? full) + "=s256"
+    }
+
+    /// APKPure search: the result linking to ".../<package>" has its icon in the next <img>.
+    private static func apkpureIcon(_ html: String, _ package: String) -> String? {
+        guard let link = html.range(of: "/\(package)\""),
+              let img = html.range(of: "<img", range: link.upperBound..<(html.index(link.upperBound, offsetBy: 800, limitedBy: html.endIndex) ?? html.endIndex)),
+              let src = html.range(of: " src=\"", range: img.upperBound..<html.endIndex),
+              let end = html[src.upperBound...].firstIndex(of: "\"") else { return nil }
+        let url = html[src.upperBound..<end].replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(of: "w=160", with: "w=256")
+        return url.hasPrefix("https://") ? url : nil
+    }
+
+    // MARK: icons you choose yourself
+
+    @Published var iconVersion = 0
+
+    private func customIconFile(_ app: TVApp) -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("icons", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = String(String(app.uri.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" }).suffix(120))
+        return dir.appendingPathComponent(name + ".png")
+    }
+
+    func hasCustomIcon(_ app: TVApp) -> Bool { FileManager.default.fileExists(atPath: customIconFile(app).path) }
+
+    /// Saves a picture (cropped square, 256pt) as the app's icon; nil goes back to the automatic one.
+    func setCustomIcon(_ data: Data?, for app: TVApp) {
+        let file = customIconFile(app)
+        if let data, let picture = UIImage(data: data) {
+            let side: CGFloat = 256
+            let scale = max(side / picture.size.width, side / picture.size.height)
+            let size = CGSize(width: picture.size.width * scale, height: picture.size.height * scale)
+            let png = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).pngData { _ in
+                picture.draw(in: CGRect(x: (side - size.width) / 2, y: (side - size.height) / 2, width: size.width, height: size.height))
+            }
+            try? png.write(to: file)
+        } else {
+            try? FileManager.default.removeItem(at: file)
+        }
+        icons.removeObject(forKey: app.uri as NSString)
+        iconVersion += 1
     }
 
     private func fetchImage(_ url: URL, key: Bool = false) async -> UIImage? {
@@ -408,6 +462,7 @@ enum Key: String {
             ("Google Play Store", "com.android.vending.com.google.android.finsky.tvmainactivity.TvMainActivity"),
             ("Ciname TV", "com.ad3333m.ciname.com.ad3333m.ciname.MainActivity"),
             ("Live TV", "com.sony.dtv.tvx.com.sony.dtv.tvx.MainActivity"),
+            ("SmartTube", "com.liskovsoft.smarttubetv.beta.com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity"),
         ]
         .map { TVApp(uri: "com.sony.dtv." + $0.1, title: $0.0, icon: "") }
         .sorted { $0.title < $1.title }

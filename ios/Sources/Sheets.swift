@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// Title + close button over a scrolling body, glass sheet background.
 struct SheetScaffold<Content: View>: View {
@@ -89,6 +90,10 @@ struct AppsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     @AppStorage("iconSize") private var iconSize = 76.0
+    @AppStorage("favorites") private var favorites = ""
+    @State private var iconFor: TVApp?
+    @State private var picking = false
+    @State private var picked: PhotosPickerItem?
 
     private var shown: [TVApp] {
         search.isEmpty ? tv.apps : tv.apps.filter { $0.title.localizedCaseInsensitiveContains(search) }
@@ -125,6 +130,7 @@ struct AppsSheet: View {
                             }
                             .buttonStyle(Press())
                             .accessibilityLabel(app.title)
+                            .contextMenu { menu(app) }
                         }
                     }
                 }
@@ -132,6 +138,27 @@ struct AppsSheet: View {
         }
         .presentationDetents([.large])
         .task { await tv.loadApps() }
+        .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
+        .onChange(of: picked) { item in
+            guard let item, let app = iconFor else { return }
+            Task {
+                let data = try? await item.loadTransferable(type: Data.self)
+                if let data { tv.setCustomIcon(data, for: app) }
+                picked = nil
+            }
+        }
+    }
+
+    @ViewBuilder private func menu(_ app: TVApp) -> some View {
+        Text(app.title)
+        let pinned = Favorites.decode(favorites).contains { $0.uri == app.uri }
+        Button { favorites = Favorites.toggle(app, in: favorites) } label: {
+            Label(pinned ? "Remove from Home Screen" : "Add to Home Screen", systemImage: pinned ? "pin.slash" : "pin")
+        }
+        Button { iconFor = app; picking = true } label: { Label("Choose Icon from Photos", systemImage: "photo") }
+        if tv.hasCustomIcon(app) {
+            Button(role: .destructive) { tv.setCustomIcon(nil, for: app) } label: { Label("Use Automatic Icon", systemImage: "arrow.counterclockwise") }
+        }
     }
 }
 
@@ -158,7 +185,7 @@ struct AppIconView: View {
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color.white.opacity(current ? 0.95 : 0.12), lineWidth: current ? 3 : 1))
         .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
-        .task(id: app.uri) { image = await tv.icon(for: app) }
+        .task(id: "\(app.uri)#\(tv.iconVersion)") { image = await tv.icon(for: app) }
     }
 }
 
