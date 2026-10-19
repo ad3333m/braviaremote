@@ -146,25 +146,26 @@ struct RemoteView: View {
         let onApp = !onInput && !tv.nowPlaying.isEmpty
         return HStack(spacing: 14) {
             tile("Inputs", icon: "tv.and.mediabox", detail: onInput ? tv.nowPlaying : "HDMI & more") { panel = .inputs }
-            tile("Apps", icon: "square.grid.2x2", detail: onApp ? tv.nowPlaying : "Open any app") { panel = .apps }
+            tile("Apps", icon: "square.grid.2x2", detail: onApp ? tv.nowPlaying : "All apps") { panel = .apps }
         }
     }
 
     private func tile(_ title: String, icon: String, detail: String, action: @escaping () -> Void) -> some View {
         Button { haptic(.medium); action() } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .medium))
-                    .frame(width: 42, height: 42)
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 36, height: 36)
                     .background(Color.white.opacity(0.12), in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 17, weight: .semibold))
-                    Text(detail).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                    Text(detail).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1).minimumScaleFactor(0.75)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
             .frame(height: 74)
             .glass(24, interactive: true)
@@ -179,21 +180,21 @@ struct RemoteView: View {
         if !apps.isEmpty {
             // Centred when they fit, scrolling when there are too many.
             ViewThatFits(in: .horizontal) {
-                favoriteIcons(apps).padding(14).frame(maxWidth: .infinity)
-                ScrollView(.horizontal, showsIndicators: false) { favoriteIcons(apps).padding(14) }
+                favoriteIcons(apps).padding(12).frame(maxWidth: .infinity)
+                ScrollView(.horizontal, showsIndicators: false) { favoriteIcons(apps).padding(12) }
             }
             .glass(26)
         }
     }
 
     private func favoriteIcons(_ apps: [TVApp]) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             ForEach(apps) { app in
                 Button {
                     haptic(.medium)
                     Task { await tv.open(app) }
                 } label: {
-                    AppIconView(app: app, size: 58, current: app.uri == tv.nowURI)
+                    AppIconView(app: app, size: 54, current: app.uri == tv.nowURI)
                 }
                 .buttonStyle(Press())
                 .accessibilityLabel(app.title)
@@ -203,12 +204,12 @@ struct RemoteView: View {
 
     // MARK: d-pad
 
-    /// Height left for the d-pad once the fixed rows are placed (rows + 16pt gaps + padding), 170–262pt.
+    /// Height left for the d-pad once the fixed rows are placed (rows + 16pt gaps + padding), 170–300pt.
     private func dpadSize(_ height: CGFloat) -> CGFloat {
         var fixed: CGFloat = 14 + 58 + 74 + 76 + 104 + 16 * 7
-        if !Favorites.decode(favorites).isEmpty { fixed += 86 + 16 }
+        if !Favorites.decode(favorites).isEmpty { fixed += 78 + 16 }
         if tv.power == .offline || tv.power == .badKey { fixed += 80 + 16 }
-        return min(262, max(170, height - fixed))
+        return min(300, max(170, height - fixed))
     }
 
     private func dpad(_ size: CGFloat) -> some View {
