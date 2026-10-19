@@ -159,6 +159,7 @@ struct AppsSheet: View {
         if tv.hasCustomIcon(app) {
             Button(role: .destructive) { tv.setCustomIcon(nil, for: app) } label: { Label("Use Automatic Icon", systemImage: "arrow.counterclockwise") }
         }
+        Button { UIPasteboard.general.string = tv.appInfo(app) } label: { Label("Copy App Info", systemImage: "doc.on.doc") }
     }
 }
 
@@ -233,6 +234,8 @@ struct SettingsSheet: View {
     @AppStorage("psk") private var psk = ""
     @AppStorage("iconSize") private var iconSize = 76.0
     @AppStorage("favorites") private var favorites = ""
+    @AppStorage("tvName") private var tvName = ""
+    @AppStorage("model") private var savedModel = ""
     @State private var note = ""
     @State private var busy = false
 
@@ -241,6 +244,7 @@ struct SettingsSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 field("TV address", "192.168.4.50", $host, .numbersAndPunctuation)
                 field("Pre-Shared Key", "1234", $psk, .asciiCapable)
+                field("TV name", braviaSeries(savedModel), $tvName, .default)
 
                 HStack(spacing: 12) {
                     pill("Find my TV", "magnifyingglass", find)

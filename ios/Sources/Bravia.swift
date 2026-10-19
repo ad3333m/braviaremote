@@ -162,6 +162,7 @@ enum Key: String {
 
         if model.isEmpty, let info = (try? await client.call("system", "getSystemInformation"))?.first as? [String: Any] {
             model = info["model"] as? String ?? ""
+            if !model.isEmpty { UserDefaults.standard.set(model, forKey: "model") }
             if let mac = info["macAddr"] as? String, !mac.isEmpty { UserDefaults.standard.set(mac, forKey: "mac") }
         }
         if !codesLoaded, let r = try? await client.call("system", "getRemoteControllerInfo"), r.count > 1,
@@ -342,12 +343,16 @@ enum Key: String {
         "com.ad3333m.ciname": "https://raw.githubusercontent.com/ad3333m/anikku/main/ciname/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
     ]
 
-    /// Icon order: one you picked from Photos, a known one, Google Play, the TV's own, APKPure (sideloaded apps),
-    /// else nil for a letter tile.
+    /// Icon order: one you picked from Photos, one collected earlier, a known one, Google Play, the TV's own,
+    /// APKPure (sideloaded apps), else nil for a letter tile. Whatever is found is kept on the phone for good.
     func icon(for app: TVApp) async -> UIImage? {
         if let hit = icons.object(forKey: app.uri as NSString) { return hit }
-        var image = UIImage(contentsOfFile: customIconFile(app).path)
-        if image == nil, let own = app.packages.lazy.compactMap({ Self.ownIcons[$0] }).first, let url = URL(string: own) {
+        if let mine = UIImage(contentsOfFile: customIconFile(app).path) ?? UIImage(contentsOfFile: savedIconFile(app).path) {
+            icons.setObject(mine, forKey: app.uri as NSString)
+            return mine
+        }
+        var image: UIImage?
+        if let own = app.packages.lazy.compactMap({ Self.ownIcons[$0] }).first, let url = URL(string: own) {
             image = await fetchImage(url)
         }
         for package in app.packages where image == nil {
@@ -357,18 +362,70 @@ enum Key: String {
                 image = await fetchImage(url)
             }
         }
-        if image == nil, var parts = URLComponents(string: app.icon), parts.scheme != nil {
-            if parts.host == "localhost" || parts.host == "127.0.0.1" { parts.host = host }
-            if let url = parts.url { image = await fetchImage(url, key: true) }
-        }
+        if image == nil { image = await tvIcon(app) }
         for package in app.packages where image == nil {
             if let url = await storeIcon(package, store: "apkpureIcons", page: "https://apkpure.com/search?q=\(package)",
                                          parse: { Self.apkpureIcon($0, package) }) {
                 image = await fetchImage(url)
             }
         }
-        if let image { icons.setObject(image, forKey: app.uri as NSString) }
+        if let image {
+            icons.setObject(image, forKey: app.uri as NSString)
+            try? image.pngData()?.write(to: savedIconFile(app))
+        }
         return image
+    }
+
+    /// What happened when the TV's own icon was fetched, for "Copy App Info".
+    private(set) var iconLog: [String: String] = [:]
+
+    /// The icon address the TV gave for the app: tried as given, with localhost/relative paths pointed at the TV,
+    /// over http as well as https (the TV's certificate is self-signed), with and without the key.
+    private func tvIcon(_ app: TVApp) async -> UIImage? {
+        let raw = app.icon.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty, !host.isEmpty else { iconLog[app.uri] = "The TV sent no icon address."; return nil }
+        var urls: [URL] = []
+        if var parts = URLComponents(string: raw), parts.scheme != nil {
+            if ["localhost", "127.0.0.1", "0.0.0.0", ""].contains(parts.host ?? "") { parts.host = host }
+            if let url = parts.url { urls.append(url) }
+            if parts.scheme == "https" { parts.scheme = "http"; parts.port = nil; if let url = parts.url { urls.append(url) } }
+        } else if let url = URL(string: "http://\(host)" + (raw.hasPrefix("/") ? raw : "/" + raw)) {
+            urls.append(url)
+        }
+        var log: [String] = []
+        for url in urls {
+            for key in [true, false] {
+                var req = URLRequest(url: url, timeoutInterval: 8)
+                if key { req.setValue(psk, forHTTPHeaderField: "X-Auth-PSK") }
+                do {
+                    let (data, response) = try await Self.tvSession.data(for: req)
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    if let image = UIImage(data: data) { iconLog[app.uri] = "Loaded \(url.absoluteString)"; return image }
+                    log.append("\(url.absoluteString)\(key ? " +key" : ""): HTTP \(status), \(data.count) bytes, not an image")
+                } catch {
+                    log.append("\(url.absoluteString)\(key ? " +key" : ""): \(error.localizedDescription)")
+                }
+            }
+        }
+        iconLog[app.uri] = log.joined(separator: "\n")
+        return nil
+    }
+
+    /// For pasting back to me when an icon won't show.
+    func appInfo(_ app: TVApp) -> String {
+        """
+        \(app.title)
+        uri: \(app.uri)
+        tv icon: \(app.icon.isEmpty ? "(none)" : app.icon)
+        packages: \(app.packages.joined(separator: ", "))
+        \(iconLog[app.uri] ?? "")
+        """
+    }
+
+    private static let tvSession = URLSession(configuration: .default, delegate: TrustLocal(), delegateQueue: nil)
+
+    private func savedIconFile(_ app: TVApp) -> URL {
+        customIconFile(app).deletingLastPathComponent().appendingPathComponent("auto-" + customIconFile(app).lastPathComponent)
     }
 
     /// Looks the package up on a store page once and remembers the icon address ("" = not there).
@@ -481,6 +538,17 @@ enum Key: String {
     }
 }
 
+/// "K-77XR80" → "BRAVIA 8", "K-65XR8M2" → "BRAVIA 8 II", "K-50S30" → "BRAVIA 3", "XR-65A95L" → "BRAVIA A95L".
+func braviaSeries(_ model: String) -> String {
+    let m = model.uppercased()
+    if let r = m.range(of: "(XR|S)[0-9](0|M2)$", options: .regularExpression) {
+        let code = m[r]
+        return "BRAVIA " + String(code.first(where: \.isNumber) ?? " ") + (code.hasSuffix("M2") ? " II" : "")
+    }
+    if let r = m.range(of: "[A-Z][0-9]{2,3}[A-Z]$", options: .regularExpression) { return "BRAVIA " + m[r] }
+    return "BRAVIA"
+}
+
 // MARK: - favourite apps for the remote's home screen, kept as "uri<TAB>title<TAB>icon" lines
 
 enum Favorites {
@@ -583,5 +651,22 @@ enum WakeOnLAN {
             if n == packet.count { sent = true }
         }
         return sent
+    }
+}
+
+// MARK: - TV icon fetching
+
+/// Trusts the TV's self-signed certificate, and only for addresses on the home network.
+final class TrustLocal: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let host = challenge.protectionSpace.host
+        let local = host.hasPrefix("192.168.") || host.hasPrefix("10.") || host.hasSuffix(".local")
+            || (host.hasPrefix("172.") && (16...31).contains(Int(host.split(separator: ".").dropFirst().first ?? "") ?? 0))
+        if local, let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }

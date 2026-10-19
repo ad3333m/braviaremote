@@ -20,25 +20,34 @@ struct RemoteView: View {
     @EnvironmentObject private var tv: TV
     @State private var panel: Panel?
     @AppStorage("favorites") private var favorites = ""
+    @AppStorage("tvName") private var tvName = ""
+    @AppStorage("model") private var savedModel = ""
     @Environment(\.scenePhase) private var phase
     private let poll = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
             Backdrop()
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 22) {
-                    header
-                    problem
-                    sources
-                    favoritesRow
-                    dpad
-                    navRow
-                    HStack(spacing: 14) { media; volume }
+            // Everything fits on one screen: the d-pad takes whatever height is left (small phones still scroll).
+            GeometryReader { geo in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        header
+                        problem
+                        sources
+                        favoritesRow
+                        Spacer(minLength: 0)
+                        dpad(dpadSize(geo.size.height))
+                        Spacer(minLength: 0)
+                        navRow
+                        HStack(spacing: 14) { media; volume }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
+                    .frame(minHeight: geo.size.height)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 40)
+                .bouncesOnlyWhenNeeded()
             }
             toast
         }
@@ -67,7 +76,8 @@ struct RemoteView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("BRAVIA").font(.system(size: 26, weight: .semibold)).tracking(6)
+                Text(title).font(.system(size: 26, weight: .semibold)).tracking(title.count > 10 ? 1 : 4)
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 HStack(spacing: 7) {
                     Circle().fill(statusColor).frame(width: 8, height: 8)
                         .shadow(color: statusColor, radius: 4)
@@ -80,6 +90,12 @@ struct RemoteView: View {
                 Task { await tv.togglePower() }
             }
         }
+    }
+
+    /// Your name for the TV, else its series worked out from the model ("K-77XR80" is a BRAVIA 8).
+    private var title: String {
+        let custom = tvName.trimmingCharacters(in: .whitespaces)
+        return custom.isEmpty ? braviaSeries(tv.model.isEmpty ? savedModel : tv.model) : custom
     }
 
     private var statusText: String {
@@ -136,20 +152,22 @@ struct RemoteView: View {
 
     private func tile(_ title: String, icon: String, detail: String, action: @escaping () -> Void) -> some View {
         Button { haptic(.medium); action() } label: {
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(width: 42, height: 42)
                     .background(Color.white.opacity(0.12), in: Circle())
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                Spacer(minLength: 14)
-                Text(title).font(.system(size: 19, weight: .semibold))
-                Text(detail).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 17, weight: .semibold))
+                    Text(detail).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 128)
-            .padding(16)
-            .glass(26, interactive: true)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity)
+            .frame(height: 74)
+            .glass(24, interactive: true)
         }
         .buttonStyle(Press())
     }
@@ -159,55 +177,70 @@ struct RemoteView: View {
     @ViewBuilder private var favoritesRow: some View {
         let apps = Favorites.decode(favorites)
         if !apps.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(apps) { app in
-                        Button {
-                            haptic(.medium)
-                            Task { await tv.open(app) }
-                        } label: {
-                            AppIconView(app: app, size: 58, current: app.uri == tv.nowURI)
-                        }
-                        .buttonStyle(Press())
-                        .accessibilityLabel(app.title)
-                    }
-                }
-                .padding(14)
+            // Centred when they fit, scrolling when there are too many.
+            ViewThatFits(in: .horizontal) {
+                favoriteIcons(apps).padding(14).frame(maxWidth: .infinity)
+                ScrollView(.horizontal, showsIndicators: false) { favoriteIcons(apps).padding(14) }
             }
             .glass(26)
         }
     }
 
+    private func favoriteIcons(_ apps: [TVApp]) -> some View {
+        HStack(spacing: 14) {
+            ForEach(apps) { app in
+                Button {
+                    haptic(.medium)
+                    Task { await tv.open(app) }
+                } label: {
+                    AppIconView(app: app, size: 58, current: app.uri == tv.nowURI)
+                }
+                .buttonStyle(Press())
+                .accessibilityLabel(app.title)
+            }
+        }
+    }
+
     // MARK: d-pad
 
-    private var dpad: some View {
-        ZStack {
-            Circle().fill(Color.white.opacity(0.001)).frame(width: 262, height: 262).glass(131)
+    /// Height left for the d-pad once the fixed rows are placed (rows + 16pt gaps + padding), 170–262pt.
+    private func dpadSize(_ height: CGFloat) -> CGFloat {
+        var fixed: CGFloat = 14 + 58 + 74 + 76 + 104 + 16 * 7
+        if !Favorites.decode(favorites).isEmpty { fixed += 86 + 16 }
+        if tv.power == .offline || tv.power == .badKey { fixed += 80 + 16 }
+        return min(262, max(170, height - fixed))
+    }
+
+    private func dpad(_ size: CGFloat) -> some View {
+        let ok = size * 0.37
+        let arrowSide = (size - ok) / 2
+        return ZStack {
+            Circle().fill(Color.white.opacity(0.001)).frame(width: size, height: size).glass(size / 2)
             VStack(spacing: 0) {
-                arrow("chevron.up", .up)
+                arrow("chevron.up", .up, arrowSide)
                 HStack(spacing: 0) {
-                    arrow("chevron.left", .left)
+                    arrow("chevron.left", .left, arrowSide)
                     Button { haptic(.medium); tv.send(.ok) } label: {
                         Text("OK")
                             .font(.system(size: 19, weight: .semibold))
-                            .frame(width: 96, height: 96)
-                            .glass(48, tint: .white.opacity(0.12), interactive: true)
+                            .frame(width: ok, height: ok)
+                            .glass(ok / 2, tint: .white.opacity(0.12), interactive: true)
                     }
                     .buttonStyle(Press())
-                    arrow("chevron.right", .right)
+                    arrow("chevron.right", .right, arrowSide)
                 }
-                arrow("chevron.down", .down)
+                arrow("chevron.down", .down, arrowSide)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func arrow(_ icon: String, _ key: Key) -> some View {
+    private func arrow(_ icon: String, _ key: Key, _ side: CGFloat) -> some View {
         RepeatButton(action: { tv.send(key) }) {
             Image(systemName: icon)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 80, height: 80)
+                .frame(width: side, height: side)
         }
     }
 
@@ -254,7 +287,7 @@ struct RemoteView: View {
     private func mediaKey(_ icon: String, _ key: Key) -> some View {
         Button { haptic(); tv.send(key) } label: {
             Image(systemName: icon).font(.system(size: 19, weight: .semibold))
-                .frame(maxWidth: .infinity).frame(height: 62).contentShape(Rectangle())
+                .frame(maxWidth: .infinity).frame(height: 51).contentShape(Rectangle())
         }
         .buttonStyle(Press())
     }
@@ -262,7 +295,7 @@ struct RemoteView: View {
     private var volume: some View {
         HStack(spacing: 0) {
             RepeatButton(action: { tv.send(.volumeDown) }) {
-                Image(systemName: "minus").font(.system(size: 20, weight: .bold)).frame(width: 50, height: 124)
+                Image(systemName: "minus").font(.system(size: 20, weight: .bold)).frame(width: 50, height: 104)
             }
             Button { haptic(.medium); tv.send(.mute) } label: {
                 VStack(spacing: 6) {
@@ -277,10 +310,10 @@ struct RemoteView: View {
             }
             .buttonStyle(Press())
             RepeatButton(action: { tv.send(.volumeUp) }) {
-                Image(systemName: "plus").font(.system(size: 20, weight: .bold)).frame(width: 50, height: 124)
+                Image(systemName: "plus").font(.system(size: 20, weight: .bold)).frame(width: 50, height: 104)
             }
         }
-        .frame(height: 124)
+        .frame(height: 104)
         .glass(26)
     }
 

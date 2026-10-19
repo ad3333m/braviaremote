@@ -35,6 +35,11 @@ extension View {
         #endif
     }
 
+    /// A screen that already fits shouldn't rubber-band.
+    @ViewBuilder func bouncesOnlyWhenNeeded() -> some View {
+        if #available(iOS 16.4, *) { scrollBounceBehavior(.basedOnSize) } else { self }
+    }
+
     /// Sheets: iOS 26 draws its own glass; 16.4–18 get a see-through material.
     @ViewBuilder func sheetGlass() -> some View {
         if #available(iOS 26.0, *) {
