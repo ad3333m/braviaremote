@@ -12,13 +12,14 @@ struct BraviaRemoteApp: App {
 }
 
 enum Panel: String, Identifiable {
-    case inputs, apps, keyboard, settings
+    case inputs, apps, keyboard, assistant, settings
     var id: String { rawValue }
 }
 
 struct RemoteView: View {
     @EnvironmentObject private var tv: TV
     @State private var panel: Panel?
+    @AppStorage("favorites") private var favorites = ""
     @Environment(\.scenePhase) private var phase
     private let poll = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
@@ -30,6 +31,7 @@ struct RemoteView: View {
                     header
                     problem
                     sources
+                    favoritesRow
                     dpad
                     navRow
                     HStack(spacing: 14) { media; volume }
@@ -46,6 +48,7 @@ struct RemoteView: View {
             case .inputs: InputsSheet()
             case .apps: AppsSheet()
             case .keyboard: KeyboardSheet()
+            case .assistant: AssistantSheet()
             case .settings: SettingsSheet()
             }
         }
@@ -151,6 +154,30 @@ struct RemoteView: View {
         .buttonStyle(Press())
     }
 
+    // MARK: favourite apps (picked in settings)
+
+    @ViewBuilder private var favoritesRow: some View {
+        let apps = Favorites.decode(favorites)
+        if !apps.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(apps) { app in
+                        Button {
+                            haptic(.medium)
+                            Task { await tv.open(app) }
+                        } label: {
+                            AppIconView(app: app, size: 58, current: app.uri == tv.nowURI)
+                        }
+                        .buttonStyle(Press())
+                        .accessibilityLabel(app.title)
+                    }
+                }
+                .padding(14)
+            }
+            .glass(26)
+        }
+    }
+
     // MARK: d-pad
 
     private var dpad: some View {
@@ -188,15 +215,16 @@ struct RemoteView: View {
 
     private var navRow: some View {
         HStack {
-            labelled("Back") { RoundButton(icon: "arrow.uturn.backward") { tv.send(.back) } }
-            Spacer()
-            labelled("Home") { RoundButton(icon: "house.fill") { tv.send(.home) } }
-            Spacer()
-            labelled("Options") { RoundButton(icon: "ellipsis") { tv.send(.options) } }
-            Spacer()
-            labelled("Type") { RoundButton(icon: "keyboard") { panel = .keyboard } }
+            labelled("Back") { RoundButton(icon: "arrow.uturn.backward", size: 54) { tv.send(.back) } }
+            Spacer(minLength: 4)
+            labelled("Home") { RoundButton(icon: "house.fill", size: 54) { tv.send(.home) } }
+            Spacer(minLength: 4)
+            labelled("Assistant") { RoundButton(icon: "mic.fill", size: 54) { panel = .assistant } }
+            Spacer(minLength: 4)
+            labelled("Options") { RoundButton(icon: "ellipsis", size: 54) { tv.send(.options) } }
+            Spacer(minLength: 4)
+            labelled("Type") { RoundButton(icon: "keyboard", size: 54) { panel = .keyboard } }
         }
-        .padding(.horizontal, 6)
     }
 
     private func labelled<B: View>(_ text: String, @ViewBuilder _ button: () -> B) -> some View {

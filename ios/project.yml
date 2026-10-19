@@ -30,6 +30,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: BraviaRemote talks to your BRAVIA on your Wi-Fi to switch inputs, open apps and act as a remote.
+        NSMicrophoneUsageDescription: Hold the Assistant mic to ask your TV something; your words are turned into text and sent to the TV.
+        NSSpeechRecognitionUsageDescription: BraviaRemote turns what you say into text for the TV's Google search.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoads: true
@@ -38,8 +40,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ad3333m.braviaremote
         PRODUCT_NAME: BraviaRemote
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "2"
+        MARKETING_VERSION: "1.2.0"
+        CURRENT_PROJECT_VERSION: "3"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

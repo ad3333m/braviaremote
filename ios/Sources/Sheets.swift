@@ -205,6 +205,7 @@ struct SettingsSheet: View {
     @AppStorage("host") private var host = ""
     @AppStorage("psk") private var psk = ""
     @AppStorage("iconSize") private var iconSize = 76.0
+    @AppStorage("favorites") private var favorites = ""
     @State private var note = ""
     @State private var busy = false
 
@@ -224,6 +225,8 @@ struct SettingsSheet: View {
                         Text(note).font(.subheadline).foregroundStyle(.white.opacity(0.8))
                     }
                 }
+
+                homeApps
 
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
@@ -266,6 +269,45 @@ struct SettingsSheet: View {
         .presentationDetents([.large])
         .task { if tv.apps.isEmpty { await tv.loadApps() } }
         .onDisappear { tv.reset() }
+    }
+
+    /// Tick apps to pin them to the remote's home screen.
+    private var homeApps: some View {
+        let picked = Set(Favorites.decode(favorites).map(\.uri))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("HOME SCREEN APPS").font(.caption.weight(.bold)).tracking(0.8).foregroundStyle(.white.opacity(0.55))
+                Spacer()
+                Text("\(picked.count) chosen").font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.55))
+            }
+            if tv.apps.isEmpty {
+                Text(tv.power == .on ? "Loading apps…" : "Connect to the TV to choose apps.")
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.65))
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(tv.apps) { app in
+                        Button {
+                            haptic()
+                            favorites = Favorites.toggle(app, in: favorites)
+                        } label: {
+                            HStack(spacing: 12) {
+                                AppIconView(app: app, size: 38)
+                                Text(app.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                                Spacer()
+                                Image(systemName: picked.contains(app.uri) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .foregroundStyle(.white.opacity(picked.contains(app.uri) ? 1 : 0.35))
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(Press())
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .glass(24)
     }
 
     /// As many preview icons as fit across the sheet.

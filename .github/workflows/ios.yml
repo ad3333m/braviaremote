@@ -43,7 +43,7 @@ jobs:
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3
           xcrun simctl install "$UDID" "$APP"
           mkdir -p shots
-          for s in remote inputs apps settings; do
+          for s in remote inputs apps assistant settings; do
             xcrun simctl terminate "$UDID" com.ad3333m.braviaremote || true
             xcrun simctl launch "$UDID" com.ad3333m.braviaremote -demo YES -sheet "$s"
             sleep 6

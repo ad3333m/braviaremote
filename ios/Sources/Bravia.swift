@@ -230,6 +230,24 @@ enum Key: String {
         }
     }
 
+    /// Opens Google search / Assistant on the TV, then types the request into it.
+    func ask(_ words: String) async {
+        if demo { show("Asked: \(words)"); return }
+        await ensureOn()
+        if apps.isEmpty { await loadApps() }
+        let assistant = apps.first { app in
+            app.uri.contains("katniss") || ["assistant", "google search"].contains { app.title.lowercased().contains($0) }
+        }
+        if let assistant {
+            _ = try? await client.call("appControl", "setActiveApp", [["uri": assistant.uri]])
+        } else if let key = codes.keys.first(where: { name in ["assist", "search", "voice"].contains { name.lowercased().contains($0) } }),
+                  let code = codes[key] {
+            try? await client.sendIRCC(code)
+        }
+        try? await Task.sleep(nanoseconds: 1_800_000_000)
+        await run("Asked: \(words)") { try await $0.call("appControl", "setTextForm", [words]) }
+    }
+
     func typeText(_ text: String) async {
         await run("Sent to the TV") { try await $0.call("appControl", "setTextForm", [text]) }
     }
@@ -386,6 +404,31 @@ enum Key: String {
         .map { TVApp(uri: "com.sony.dtv." + $0.1, title: $0.0, icon: "") }
         .sorted { $0.title < $1.title }
         nowURI = "extInput:hdmi?port=2"; nowPlaying = "Nintendo Switch"
+        if Favorites.decode(UserDefaults.standard.string(forKey: "favorites") ?? "").isEmpty {
+            let picks = apps.filter { ["YouTube", "Netflix", "Ciname TV", "Spotify", "Disney+"].contains($0.title) }
+            UserDefaults.standard.set(Favorites.encode(picks), forKey: "favorites")
+        }
+    }
+}
+
+// MARK: - favourite apps for the remote's home screen, kept as "uri<TAB>title<TAB>icon" lines
+
+enum Favorites {
+    static func decode(_ raw: String) -> [TVApp] {
+        raw.split(separator: "\n").compactMap { line in
+            let f = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            return f.count >= 2 ? TVApp(uri: f[0], title: f[1], icon: f.count > 2 ? f[2] : "") : nil
+        }
+    }
+
+    static func encode(_ apps: [TVApp]) -> String {
+        apps.map { "\($0.uri)\t\($0.title)\t\($0.icon)" }.joined(separator: "\n")
+    }
+
+    static func toggle(_ app: TVApp, in raw: String) -> String {
+        var list = decode(raw)
+        if let i = list.firstIndex(where: { $0.uri == app.uri }) { list.remove(at: i) } else { list.append(app) }
+        return encode(list)
     }
 }
 
