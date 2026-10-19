@@ -1,0 +1,308 @@
+import SwiftUI
+
+/// Title + close button over a scrolling body, glass sheet background.
+struct SheetScaffold<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title).font(.system(size: 28, weight: .bold, design: .rounded))
+                Spacer()
+                Button { haptic(); dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .bold))
+                        .frame(width: 36, height: 36)
+                        .glass(18, interactive: true)
+                }
+                .buttonStyle(Press())
+            }
+            .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 14)
+            ScrollView(showsIndicators: false) {
+                content().padding(.horizontal, 20).padding(.bottom, 30)
+            }
+        }
+        .foregroundStyle(.white)
+        .presentationDragIndicator(.visible)
+        .sheetGlass()
+    }
+}
+
+// MARK: - inputs
+
+struct InputsSheet: View {
+    @EnvironmentObject private var tv: TV
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        SheetScaffold(title: "Inputs") {
+            if tv.inputs.isEmpty {
+                empty(tv.power == .on ? "Looking for inputs…" : "Turn the TV on to see its inputs.")
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(tv.inputs) { input in
+                        Button {
+                            haptic(.medium)
+                            Task { await tv.switchTo(input) }
+                            dismiss()
+                        } label: { row(input) }
+                        .buttonStyle(Press())
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .task { await tv.loadInputs() }
+    }
+
+    private func row(_ input: TVInput) -> some View {
+        let current = input.uri == tv.nowURI
+        let accent = Color(red: 0.1, green: 0.75, blue: 0.95)
+        return HStack(spacing: 14) {
+            Image(systemName: input.symbol)
+                .font(.system(size: 19, weight: .semibold))
+                .frame(width: 46, height: 46)
+                .background((current ? accent : Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(input.name).font(.system(size: 17, weight: .semibold))
+                Text(input.label.isEmpty ? (input.connected ? "Connected" : "Nothing plugged in") : input.title)
+                    .font(.footnote).foregroundStyle(.white.opacity(0.6))
+            }
+            Spacer()
+            if current {
+                Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(accent)
+            } else if input.connected {
+                Circle().fill(Color.green).frame(width: 8, height: 8)
+            }
+        }
+        .padding(14)
+        .glass(22, tint: current ? accent.opacity(0.3) : nil, interactive: true)
+        .opacity(input.connected || current ? 1 : 0.55)
+    }
+}
+
+// MARK: - apps
+
+struct AppsSheet: View {
+    @EnvironmentObject private var tv: TV
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var shown: [TVApp] {
+        search.isEmpty ? tv.apps : tv.apps.filter { $0.title.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        SheetScaffold(title: "Apps") {
+            VStack(spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.6))
+                    TextField("Search apps", text: $search)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !search.isEmpty {
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.5)) }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 13)
+                .glass(18)
+
+                if tv.apps.isEmpty {
+                    empty(tv.power == .on ? "Loading apps…" : "Turn the TV on to see its apps.")
+                } else if shown.isEmpty {
+                    empty("No app called \"\(search)\".")
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 14)], spacing: 20) {
+                        ForEach(shown) { app in
+                            Button {
+                                haptic(.medium)
+                                Task { await tv.open(app) }
+                                dismiss()
+                            } label: {
+                                VStack(spacing: 8) {
+                                    AppIconView(app: app, current: app.uri == tv.nowURI)
+                                    Text(app.title).font(.caption.weight(.medium)).lineLimit(1)
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
+                            }
+                            .buttonStyle(Press())
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .task { await tv.loadApps() }
+    }
+}
+
+struct AppIconView: View {
+    let app: TVApp
+    let current: Bool
+    @EnvironmentObject private var tv: TV
+    @State private var image: UIImage?
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                LinearGradient(colors: [Color(hue: hue, saturation: 0.65, brightness: 0.85),
+                                        Color(hue: hue, saturation: 0.8, brightness: 0.45)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Text(String(app.title.prefix(1)).uppercased())
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(current ? Color(red: 0.65, green: 0.45, blue: 1) : Color.white.opacity(0.18),
+                                    lineWidth: current ? 3 : 1))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 6)
+        .task(id: app.icon) { image = await tv.icon(app.icon) }
+    }
+
+    /// Stable colour per app name for the letter tile.
+    private var hue: Double {
+        Double(app.title.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 360 }) / 360
+    }
+}
+
+// MARK: - typing into the TV's search boxes
+
+struct KeyboardSheet: View {
+    @EnvironmentObject private var tv: TV
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        SheetScaffold(title: "Type") {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Select a search or text box on the TV first, then type here.")
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                HStack(spacing: 10) {
+                    TextField("Text to send", text: $text)
+                        .focused($focused)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.send)
+                        .onSubmit(send)
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .glass(18)
+                    RoundButton(icon: "paperplane.fill", size: 52, tint: Color(red: 0.36, green: 0.3, blue: 0.95), action: send)
+                }
+            }
+        }
+        .presentationDetents([.height(240)])
+        .onAppear { focused = true }
+    }
+
+    private func send() {
+        guard !text.isEmpty else { return }
+        let t = text
+        Task { await tv.typeText(t) }
+    }
+}
+
+// MARK: - settings
+
+struct SettingsSheet: View {
+    @EnvironmentObject private var tv: TV
+    @AppStorage("host") private var host = ""
+    @AppStorage("psk") private var psk = ""
+    @State private var note = ""
+    @State private var busy = false
+
+    var body: some View {
+        SheetScaffold(title: "Your TV") {
+            VStack(alignment: .leading, spacing: 16) {
+                field("TV address", "192.168.4.50", $host, .numbersAndPunctuation)
+                field("Pre-Shared Key", "1234", $psk, .asciiCapable)
+
+                HStack(spacing: 12) {
+                    pill("Find my TV", "magnifyingglass", find)
+                    pill("Test", "checkmark.seal.fill", test)
+                }
+                if busy || !note.isEmpty {
+                    HStack(spacing: 10) {
+                        if busy { ProgressView().tint(.white) }
+                        Text(note).font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Set up the TV once", systemImage: "tv").font(.headline)
+                    step(1, "On the TV open Settings → Network & Internet → Home network → IP control.")
+                    step(2, "Set Authentication to \"Normal and Pre-Shared Key\" and pick a key, e.g. 1234. Enter the same key above.")
+                    step(3, "Turn on Settings → Network & Internet → Remote start, so BraviaRemote can turn the TV on.")
+                    step(4, "Keep your iPhone on the same Wi-Fi as the TV, and allow Local Network when iOS asks.")
+                }
+                .padding(18)
+                .glass(24)
+            }
+        }
+        .presentationDetents([.large])
+        .onDisappear { tv.reset() }
+    }
+
+    private func field(_ label: String, _ hint: String, _ value: Binding<String>, _ keyboard: UIKeyboardType) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label.uppercased()).font(.caption.weight(.bold)).tracking(0.8).foregroundStyle(.white.opacity(0.55))
+            TextField(hint, text: value)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.body.monospaced())
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .glass(18)
+        }
+    }
+
+    private func pill(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button { haptic(); action() } label: {
+            Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity).padding(.vertical, 14)
+                .glass(20, tint: Color(red: 0.36, green: 0.3, blue: 0.95).opacity(0.5), interactive: true)
+        }
+        .buttonStyle(Press())
+        .disabled(busy)
+    }
+
+    private func step(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(n)").font(.caption.weight(.heavy))
+                .frame(width: 24, height: 24)
+                .background(Color.white.opacity(0.15), in: Circle())
+            Text(text).font(.subheadline).foregroundStyle(.white.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func find() {
+        busy = true; note = "Searching your Wi-Fi…"
+        Task {
+            if let found = await TVFinder.scan() {
+                host = found
+                note = "Found a BRAVIA at \(found)."
+            } else {
+                note = "No TV found. If iOS asked about Local Network, allow it and try again, or type the address."
+            }
+            busy = false
+        }
+    }
+
+    private func test() {
+        busy = true; note = "Checking…"
+        Task {
+            note = await tv.test()
+            busy = false
+        }
+    }
+}
+
+@MainActor @ViewBuilder func empty(_ text: String) -> some View {
+    Text(text)
+        .font(.subheadline).foregroundStyle(.white.opacity(0.65))
+        .frame(maxWidth: .infinity).padding(.vertical, 40)
+}

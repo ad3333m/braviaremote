@@ -1,0 +1,55 @@
+name: iOS app
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      screenshots:
+        description: Also run the simulator and take screenshots
+        type: boolean
+        default: true
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build BraviaRemote.ipa
+        run: bash ios/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BraviaRemote-ipa
+          path: dist/BraviaRemote.ipa
+
+  screenshots:
+    if: github.event_name == 'workflow_dispatch' && inputs.screenshots
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for the simulator
+        run: bash ios/build.sh simulator
+      - name: Screenshot the demo TV
+        run: |
+          APP=ios/build/Build/Products/Release-iphonesimulator/BraviaRemote.app
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = [d for rt, ds in json.load(sys.stdin)["devices"].items() if "iOS" in rt for d in ds if d["name"].startswith("iPhone")]
+          pro = [d for d in devs if "Pro" in d["name"] and "Max" not in d["name"]]
+          print((pro or devs)[-1]["udid"])')
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3
+          xcrun simctl install "$UDID" "$APP"
+          mkdir -p shots
+          for s in remote inputs apps settings; do
+            xcrun simctl terminate "$UDID" com.ad3333m.braviaremote || true
+            xcrun simctl launch "$UDID" com.ad3333m.braviaremote -demo YES -sheet "$s"
+            sleep 6
+            xcrun simctl io "$UDID" screenshot "shots/$s.png"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/
