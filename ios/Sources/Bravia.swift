@@ -244,8 +244,15 @@ enum Key: String {
                   let code = codes[key] {
             try? await client.sendIRCC(code)
         }
-        try? await Task.sleep(nanoseconds: 1_800_000_000)
-        await run("Asked: \(words)") { try await $0.call("appControl", "setTextForm", [words]) }
+        // The search box takes a moment to appear (longer when the app is cold), so keep offering the text until it's taken.
+        for attempt in 0..<10 {
+            try? await Task.sleep(nanoseconds: attempt == 0 ? 900_000_000 : 600_000_000)
+            if (try? await client.call("appControl", "setTextForm", [words])) != nil {
+                show("Asked: \(words)")
+                return
+            }
+        }
+        show("The TV didn't open a search box. Try again, or use Type.")
     }
 
     func typeText(_ text: String) async {
