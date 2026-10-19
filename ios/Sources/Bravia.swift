@@ -225,7 +225,7 @@ enum Key: String {
 
     func togglePower() async {
         if power == .on {
-            if await run({ try await $0.call("system", "setPowerStatus", [["status": false]]) }) { power = .standby }
+            if await run(nil, { try await $0.call("system", "setPowerStatus", [["status": false]]) }) { power = .standby }
         } else {
             await turnOn()
         }
